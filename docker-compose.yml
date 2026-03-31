@@ -21,6 +21,7 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+      - OPENFANG_LISTEN=0.0.0.0:50051
       - RUST_LOG=info
     restart: unless-stopped
     deploy:
