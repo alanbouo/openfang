@@ -5,7 +5,9 @@
 version: "3.8"
 services:
   openfang:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     # image: ghcr.io/rightnow-ai/openfang:latest  # Uncomment when GHCR is public
     ports:
       - "4200:4200"
@@ -19,7 +21,14 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+      - RUST_LOG=info
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
 
 volumes:
   openfang-data:

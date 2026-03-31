@@ -1,7 +1,13 @@
 # syntax=docker/dockerfile:1
-FROM rust:1-slim-bookworm AS builder
+FROM rust:1-bookworm AS builder
 WORKDIR /build
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    cmake \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY xtask ./xtask
@@ -9,11 +15,11 @@ COPY agents ./agents
 COPY packages ./packages
 # Optional build args for dev environments to speed up compilation
 # Example: docker build --build-arg LTO=false --build-arg CODEGEN_UNITS=16 .
-ARG LTO=true
-ARG CODEGEN_UNITS=1
+ARG LTO=false
+ARG CODEGEN_UNITS=16
 ENV CARGO_PROFILE_RELEASE_LTO=${LTO} \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}
-RUN cargo build --release --bin openfang
+RUN cargo build --release --bin openfang 2>&1
 
 FROM rust:1-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
