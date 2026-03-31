@@ -10,7 +10,7 @@ services:
       dockerfile: Dockerfile
     # image: ghcr.io/rightnow-ai/openfang:latest  # Uncomment when GHCR is public
     ports:
-      - "4200:4200"
+      - "50051:50051"
     volumes:
       - openfang-data:/data
     environment:
