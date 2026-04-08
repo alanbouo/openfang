@@ -75,12 +75,26 @@ pub async fn spawn_agent(
             match std::fs::read_to_string(&tmpl_path) {
                 Ok(content) => content,
                 Err(_) => {
-                    return (
-                        StatusCode::NOT_FOUND,
-                        Json(
-                            serde_json::json!({"error": format!("Template '{}' not found", safe_name)}),
-                        ),
-                    );
+                    // Fallback: check OPENFANG_AGENTS_DIR (e.g. Docker /opt/openfang/agents)
+                    let fallback = std::env::var("OPENFANG_AGENTS_DIR")
+                        .ok()
+                        .map(|dir| {
+                            std::path::PathBuf::from(dir)
+                                .join(&safe_name)
+                                .join("agent.toml")
+                        })
+                        .and_then(|p| std::fs::read_to_string(p).ok());
+                    match fallback {
+                        Some(content) => content,
+                        None => {
+                            return (
+                                StatusCode::NOT_FOUND,
+                                Json(
+                                    serde_json::json!({"error": format!("Template '{}' not found", safe_name)}),
+                                ),
+                            );
+                        }
+                    }
                 }
             }
         } else {
@@ -3113,37 +3127,52 @@ async fn gateway_http_get(url_with_path: &str) -> Result<serde_json::Value, Stri
 
 /// GET /api/templates — List available agent templates.
 pub async fn list_templates() -> impl IntoResponse {
-    let agents_dir = openfang_kernel::config::openfang_home().join("agents");
     let mut templates = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
 
-    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let manifest_path = path.join("agent.toml");
-                if manifest_path.exists() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
+    // Collect directories to scan: home_dir/agents first, then OPENFANG_AGENTS_DIR fallback
+    let mut dirs_to_scan = vec![openfang_kernel::config::openfang_home().join("agents")];
+    if let Ok(env_dir) = std::env::var("OPENFANG_AGENTS_DIR") {
+        let p = std::path::PathBuf::from(env_dir);
+        if p.is_dir() {
+            dirs_to_scan.push(p);
+        }
+    }
 
-                    let manifest_content = std::fs::read_to_string(&manifest_path).ok();
-                    let description = manifest_content
-                        .as_ref()
-                        .and_then(|content| toml::from_str::<AgentManifest>(content).ok())
-                        .map(|m| m.description)
-                        .unwrap_or_default();
+    for agents_dir in &dirs_to_scan {
+        if let Ok(entries) = std::fs::read_dir(agents_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let manifest_path = path.join("agent.toml");
+                    if manifest_path.exists() {
+                        let name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
 
-                    // Add category based on template name
-                    let category = get_template_category(&name);
+                        if !seen_names.insert(name.clone()) {
+                            continue; // Skip duplicates (home_dir takes priority)
+                        }
 
-                    templates.push(serde_json::json!({
-                        "name": name,
-                        "description": description,
-                        "category": category,
-                        "manifest_toml": manifest_content.unwrap_or_default(),
-                    }));
+                        let manifest_content = std::fs::read_to_string(&manifest_path).ok();
+                        let description = manifest_content
+                            .as_ref()
+                            .and_then(|content| toml::from_str::<AgentManifest>(content).ok())
+                            .map(|m| m.description)
+                            .unwrap_or_default();
+
+                        // Add category based on template name
+                        let category = get_template_category(&name);
+
+                        templates.push(serde_json::json!({
+                            "name": name,
+                            "description": description,
+                            "category": category,
+                            "manifest_toml": manifest_content.unwrap_or_default(),
+                        }));
+                    }
                 }
             }
         }
@@ -3164,6 +3193,7 @@ fn get_template_category(name: &str) -> &str {
         "ops" | "planner" => "Operations",
         "architect" | "security-auditor" => "Development",
         "code-reviewer" | "data-scientist" | "test-engineer" => "Development",
+        "marketing-director" | "blog-writer" | "social-marketer" | "copywriter" | "content-curator" => "Marketing",
         "legal-assistant" | "email-assistant" | "social-media" => "Business",
         "customer-support" | "sales-assistant" | "recruiter" => "Business",
         "meeting-assistant" => "Business",
@@ -3176,7 +3206,17 @@ fn get_template_category(name: &str) -> &str {
 /// GET /api/templates/:name — Get template details.
 pub async fn get_template(Path(name): Path<String>) -> impl IntoResponse {
     let agents_dir = openfang_kernel::config::openfang_home().join("agents");
-    let manifest_path = agents_dir.join(&name).join("agent.toml");
+    let mut manifest_path = agents_dir.join(&name).join("agent.toml");
+
+    // Fallback: check OPENFANG_AGENTS_DIR (e.g. Docker /opt/openfang/agents)
+    if !manifest_path.exists() {
+        if let Ok(env_dir) = std::env::var("OPENFANG_AGENTS_DIR") {
+            let fallback = std::path::PathBuf::from(env_dir).join(&name).join("agent.toml");
+            if fallback.exists() {
+                manifest_path = fallback;
+            }
+        }
+    }
 
     if !manifest_path.exists() {
         return (

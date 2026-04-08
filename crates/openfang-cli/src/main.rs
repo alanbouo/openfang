@@ -1495,6 +1495,11 @@ fn cmd_start(config: Option<PathBuf>, yolo: bool) {
     println!("  Starting daemon...");
     ui::blank();
 
+    // Ensure bundled agent templates are on disk so the API can resolve them by name.
+    // Skips any templates that already exist (preserves user customization).
+    let home = cli_openfang_home();
+    bundled_agents::install_bundled_agents(&home.join("agents"));
+
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let mut kernel_config = openfang_kernel::config::load_config(config.as_deref());
