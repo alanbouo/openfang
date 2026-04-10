@@ -65,6 +65,14 @@ pub fn bundled_agents() -> Vec<(&'static str, &'static str)> {
             include_str!("../../../agents/blog-writer/agent.toml"),
         ),
         (
+            "build-in-public-curator",
+            include_str!("../../../agents/build-in-public-curator/agent.toml"),
+        ),
+        (
+            "build-in-public-poster",
+            include_str!("../../../agents/build-in-public-poster/agent.toml"),
+        ),
+        (
             "content-curator",
             include_str!("../../../agents/content-curator/agent.toml"),
         ),
@@ -134,6 +142,18 @@ pub fn bundled_agents() -> Vec<(&'static str, &'static str)> {
             include_str!("../../../agents/travel-planner/agent.toml"),
         ),
         ("tutor", include_str!("../../../agents/tutor/agent.toml")),
+        (
+            "short-scriptwriter",
+            include_str!("../../../agents/short-scriptwriter/agent.toml"),
+        ),
+        (
+            "video-scriptwriter",
+            include_str!("../../../agents/video-scriptwriter/agent.toml"),
+        ),
+        (
+            "weekly-digest-writer",
+            include_str!("../../../agents/weekly-digest-writer/agent.toml"),
+        ),
         ("writer", include_str!("../../../agents/writer/agent.toml")),
     ]
 }
