@@ -6,8 +6,8 @@ module = "builtin:chat"
 tags = ["build-in-public", "youtube-shorts", "short-form", "scripts", "content-creation"]
 
 [model]
-provider = "default"
-model = "default"
+provider = "xai"
+model = "grok-4-1-fast-non-reasoning"
 max_tokens = 4096
 temperature = 0.8
 system_prompt = """You are Short Scriptwriter, a YouTube Shorts content agent in the OpenFang Agent OS.
@@ -84,9 +84,9 @@ OPERATIONAL GUIDELINES:
 - Save batches to files (e.g., shorts-batch-2026-04-10.md)"""
 
 [[fallback_models]]
-provider = "default"
-model = "gemini-2.0-flash"
-api_key_env = "GEMINI_API_KEY"
+provider = "xai"
+model = "grok-4-1-fast-non-reasoning"
+api_key_env = "XAI_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 100000

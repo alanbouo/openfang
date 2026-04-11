@@ -6,8 +6,8 @@ module = "builtin:chat"
 tags = ["build-in-public", "curation", "rss", "twitter", "daily-digest"]
 
 [model]
-provider = "default"
-model = "default"
+provider = "xai"
+model = "grok-4-1-fast-non-reasoning"
 max_tokens = 4096
 temperature = 0.5
 system_prompt = """You are Build-in-Public Curator, a content curation agent in the OpenFang Agent OS.
@@ -67,9 +67,9 @@ OPERATIONAL GUIDELINES:
 - Store the digest in shared.bip.daily_digest AND as a file for the other agents to consume"""
 
 [[fallback_models]]
-provider = "default"
-model = "gemini-2.0-flash"
-api_key_env = "GEMINI_API_KEY"
+provider = "xai"
+model = "grok-4-1-fast-non-reasoning"
+api_key_env = "XAI_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 150000
