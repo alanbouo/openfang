@@ -8,18 +8,27 @@ RUN apt-get update && apt-get install -y \
     cmake \
     git \
     && rm -rf /var/lib/apt/lists/*
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-COPY xtask ./xtask
-COPY agents ./agents
-COPY packages ./packages
 # Optional build args for dev environments to speed up compilation
 # Example: docker build --build-arg LTO=false --build-arg CODEGEN_UNITS=16 .
 ARG LTO=false
 ARG CODEGEN_UNITS=16
 ENV CARGO_PROFILE_RELEASE_LTO=${LTO} \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}
-RUN cargo build --release --bin openfang 2>&1
+
+# Copy all source
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY xtask ./xtask
+COPY agents ./agents
+COPY packages ./packages
+
+# Build with BuildKit cache mounts for cargo registry + target dir
+# This caches compiled dependencies across builds — only changed crates recompile
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --bin openfang 2>&1 \
+    && cp target/release/openfang /usr/local/bin/openfang
 
 FROM rust:1-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/openfang /usr/local/bin/
+COPY --from=builder /usr/local/bin/openfang /usr/local/bin/
 COPY --from=builder /build/agents /opt/openfang/agents
 EXPOSE 50051
 VOLUME /data
