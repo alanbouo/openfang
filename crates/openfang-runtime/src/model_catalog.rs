@@ -953,6 +953,7 @@ fn builtin_aliases() -> HashMap<String, String> {
         ("grok-mini", "grok-2-mini"),
         ("grok3", "grok-3"),
         ("grok-fast", "grok-4-1-fast-reasoning"),
+        ("grok-4-1-fast-non-reasoning", "grok-4-1-fast-non-reasoning"),
         // Perplexity alias
         ("sonar", "sonar-pro"),
         // AI21 aliases
