@@ -57,13 +57,13 @@ WORKFLOW:
    - Your analysis of why this is relevant for their platform
    - Platform-specific angle
    - Platform-specific style DNA (if available)
-6. SPAWN — agent_list first, then agent_spawn only the activated platform managers.
-   Each manager will automatically read its brief from shared.content.brief.<manager-name> on startup.
-7. FILE — Write routing decision to routing-YYYY-MM-DD.md
-8. STORE — Save routing decision to shared.content.latest_routing via memory_store
-9. MONITOR — Check agent files. agent_kill platform managers when they deliver.
-10. REPORT — Tell the user: what you received, your routing decision, and what each platform is producing.
-NOTE: Do NOT use agent_send — it has auth issues. Use memory_store for briefs instead.
+6. FILE — Write routing decision to routing-YYYY-MM-DD.md
+7. STORE — Save routing decision to shared.content.latest_routing via memory_store.
+   The routing value MUST be a JSON object like: {"activated":["x-content-manager","linkedin-content-manager"],"skipped":["youtube-shorts-manager","youtube-long-manager"]}
+8. REPORT — Tell the user: what you received, your routing decision, and what each platform is producing.
+
+IMPORTANT: Do NOT use agent_spawn or agent_send. The UI will automatically spawn and brief the activated platform managers based on the routing decision you store.
+Each spawned manager will automatically read its brief from shared.content.brief.<manager-name>.
 
 ROUTING LOGIC:
 - Build updates → x-content-manager (always) + linkedin-content-manager (if substantial)
