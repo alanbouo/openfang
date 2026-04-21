@@ -9112,7 +9112,11 @@ const KNOWN_IDENTITY_FILES: &[&str] = &[
     "HEARTBEAT.md",
 ];
 
-/// GET /api/agents/{id}/files — List workspace identity files.
+/// GET /api/agents/{id}/files — List workspace files.
+///
+/// Returns all files in the agent's workspace directory. Identity files
+/// (SOUL.md, IDENTITY.md, etc.) are always included even if missing.
+/// User-written content files (.md) are included if present.
 pub async fn list_agent_files(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -9148,19 +9152,48 @@ pub async fn list_agent_files(
     };
 
     let mut files = Vec::new();
+
+    // Scan all files in workspace directory
+    if let Ok(entries) = std::fs::read_dir(&workspace) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let meta = std::fs::metadata(&path);
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = meta
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+                .map(|dt: chrono::DateTime<chrono::Utc>| dt.to_rfc3339())
+                .unwrap_or_default();
+            files.push(serde_json::json!({
+                "name": name,
+                "size": size,
+                "modified": modified,
+                "exists": true,
+            }));
+        }
+    }
+
+    // Ensure identity files are always present in listing (even if missing on disk)
+    let listed: std::collections::HashSet<String> =
+        files.iter().filter_map(|f| f["name"].as_str().map(|s| s.to_string())).collect();
     for &name in KNOWN_IDENTITY_FILES {
-        let path = workspace.join(name);
-        let (exists, size_bytes) = if path.exists() {
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            (true, size)
-        } else {
-            (false, 0u64)
-        };
-        files.push(serde_json::json!({
-            "name": name,
-            "exists": exists,
-            "size_bytes": size_bytes,
-        }));
+        if !listed.contains(name) {
+            files.push(serde_json::json!({
+                "name": name,
+                "size": 0,
+                "modified": "",
+                "exists": false,
+            }));
+        }
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "files": files })))
@@ -9180,14 +9213,6 @@ pub async fn get_agent_file(
             );
         }
     };
-
-    // Validate filename whitelist
-    if !KNOWN_IDENTITY_FILES.contains(&filename.as_str()) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "File not in whitelist"})),
-        );
-    }
 
     let entry = match state.kernel.registry.get(agent_id) {
         Some(e) => e,
@@ -9209,7 +9234,7 @@ pub async fn get_agent_file(
         }
     };
 
-    // Security: canonicalize and verify stays inside workspace
+    // Security: canonicalize and verify stays inside workspace (path traversal protection)
     let file_path = workspace.join(&filename);
     let canonical = match file_path.canonicalize() {
         Ok(p) => p,
