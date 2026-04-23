@@ -181,6 +181,19 @@ pub fn check_agents(registry: &AgentRegistry, config: &HeartbeatConfig) -> Vec<H
             continue;
         }
 
+        // Reactive agents (no [autonomous] config) are idle by design between
+        // messages — they have no expected activity cadence so inactivity is
+        // normal, not a fault.  Skip the timeout check for Running reactive agents.
+        // Crashed reactive agents still fall through for recovery treatment.
+        if entry_ref.manifest.autonomous.is_none() && entry_ref.state == AgentState::Running {
+            debug!(
+                agent = %entry_ref.name,
+                inactive_secs,
+                "Skipping inactivity check for reactive agent"
+            );
+            continue;
+        }
+
         // Crashed agents are always considered unresponsive
         let unresponsive = entry_ref.state == AgentState::Crashed || inactive_secs > timeout_secs;
 
@@ -376,27 +389,57 @@ mod tests {
     }
 
     #[test]
-    fn test_active_agent_detected_unresponsive() {
-        // An agent that WAS active (last_active >> created_at) but has gone
-        // silent for longer than the timeout — should be flagged unresponsive.
+    fn test_autonomous_agent_detected_unresponsive() {
+        // An AUTONOMOUS agent that WAS active but has gone silent past its
+        // timeout should be flagged unresponsive.
+        use openfang_types::agent::AutonomousConfig;
         let registry = crate::registry::AgentRegistry::new();
         let ten_min_ago = Utc::now() - Duration::seconds(600);
         let five_min_ago = Utc::now() - Duration::seconds(300);
-        let active_agent = make_entry(
-            "active-agent",
+        let mut agent = make_entry(
+            "autonomous-agent",
             AgentState::Running,
             ten_min_ago,
             five_min_ago,
         );
-        registry.register(active_agent).unwrap();
+        // heartbeat_interval_secs=30 → timeout = 30*2 = 60s; inactive ~300s → unresponsive
+        agent.manifest.autonomous = Some(AutonomousConfig {
+            heartbeat_interval_secs: 30,
+            ..AutonomousConfig::default()
+        });
+        registry.register(agent).unwrap();
 
-        let config = HeartbeatConfig::default(); // timeout = 180s, inactive = ~300s
+        let config = HeartbeatConfig::default();
         let statuses = check_agents(&registry, &config);
 
         assert_eq!(statuses.len(), 1);
+        assert!(statuses[0].unresponsive, "autonomous agent past timeout should be unresponsive");
+    }
+
+    #[test]
+    fn test_reactive_agent_not_timed_out_after_completing_work() {
+        // A REACTIVE agent (no autonomous config) that completed its task and
+        // went idle should NOT be flagged unresponsive, even after a long silence.
+        // Reactive agents are only active on demand — idleness is their normal state.
+        let registry = crate::registry::AgentRegistry::new();
+        let ten_min_ago = Utc::now() - Duration::seconds(600);
+        let five_min_ago = Utc::now() - Duration::seconds(300);
+        let agent = make_entry(
+            "reactive-agent",
+            AgentState::Running,
+            ten_min_ago,
+            five_min_ago, // was active, now idle for 5 min
+        );
+        // No autonomous config — reactive agent
+        assert!(agent.manifest.autonomous.is_none());
+        registry.register(agent).unwrap();
+
+        let config = HeartbeatConfig::default(); // default_timeout_secs = 180s
+        let statuses = check_agents(&registry, &config);
+
         assert!(
-            statuses[0].unresponsive,
-            "active agent past timeout should be unresponsive"
+            statuses.is_empty(),
+            "reactive agent idle after completing work should not appear in heartbeat statuses"
         );
     }
 
