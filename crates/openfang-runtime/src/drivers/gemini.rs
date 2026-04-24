@@ -34,6 +34,8 @@ impl GeminiDriver {
             base_url,
             client: reqwest::Client::builder()
                 .user_agent(crate::USER_AGENT)
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(600))
                 .build()
                 .unwrap_or_default(),
         }
