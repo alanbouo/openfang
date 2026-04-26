@@ -8,7 +8,7 @@
 use crate::triggers::TriggerPattern;
 use dashmap::DashMap;
 use openfang_types::agent::{AgentId, ScheduleMode};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -16,6 +16,11 @@ use tracing::{debug, info, warn};
 
 /// Maximum number of concurrent background LLM calls across all agents.
 const MAX_CONCURRENT_BG_LLM: usize = 5;
+
+/// Stop the autonomous loop after this many consecutive cycle failures.
+/// The driver already retries transiently (3× for rate limits internally), so by
+/// the time a failure surfaces here it is persistent. Stop immediately.
+const MAX_CONSECUTIVE_FAILURES: u32 = 1;
 
 /// Manages background task loops for autonomous agents.
 pub struct BackgroundExecutor {
@@ -52,7 +57,7 @@ impl BackgroundExecutor {
         schedule: &ScheduleMode,
         send_message: F,
     ) where
-        F: Fn(AgentId, String) -> tokio::task::JoinHandle<()> + Send + Sync + 'static,
+        F: Fn(AgentId, String) -> tokio::task::JoinHandle<bool> + Send + Sync + 'static,
     {
         match schedule {
             ScheduleMode::Reactive => {} // nothing to do
@@ -64,6 +69,8 @@ impl BackgroundExecutor {
                 let mut shutdown = self.shutdown_rx.clone();
                 let busy = Arc::new(AtomicBool::new(false));
                 let semaphore = self.llm_semaphore.clone();
+                let consecutive_failures = Arc::new(AtomicU32::new(0));
+                let should_stop = Arc::new(AtomicBool::new(false));
 
                 info!(
                     agent = %name, id = %agent_id,
@@ -73,6 +80,15 @@ impl BackgroundExecutor {
 
                 let handle = tokio::spawn(async move {
                     loop {
+                        if should_stop.load(Ordering::SeqCst) {
+                            warn!(
+                                agent = %name,
+                                "Continuous loop: stopping after {MAX_CONSECUTIVE_FAILURES} \
+                                 consecutive failures — manual restart required"
+                            );
+                            break;
+                        }
+
                         tokio::select! {
                             _ = tokio::time::sleep(interval) => {}
                             _ = shutdown.changed() => {
@@ -95,7 +111,7 @@ impl BackgroundExecutor {
                             Ok(p) => p,
                             Err(_) => {
                                 busy.store(false, Ordering::SeqCst);
-                                break; // Semaphore closed
+                                break;
                             }
                         };
 
@@ -104,12 +120,22 @@ impl BackgroundExecutor {
                              Check your goals, review shared memory for pending tasks, \
                              and take any necessary actions. Agent: {name}"
                         );
-                        debug!(agent = %name, "Continuous loop: sending self-prompt");
                         let busy_clone = busy.clone();
+                        let failures_clone = consecutive_failures.clone();
+                        let stop_clone = should_stop.clone();
+                        let name_clone = name.clone();
                         let jh = (send_message)(agent_id, prompt);
-                        // Spawn a watcher that clears the busy flag and drops permit when done
                         tokio::spawn(async move {
-                            let _ = jh.await;
+                            let success = jh.await.unwrap_or(false);
+                            if success {
+                                failures_clone.store(0, Ordering::SeqCst);
+                            } else {
+                                let n = failures_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                                warn!(agent = %name_clone, consecutive = n, "Continuous tick failed");
+                                if n >= MAX_CONSECUTIVE_FAILURES {
+                                    stop_clone.store(true, Ordering::SeqCst);
+                                }
+                            }
                             drop(permit);
                             busy_clone.store(false, Ordering::SeqCst);
                         });
@@ -126,6 +152,8 @@ impl BackgroundExecutor {
                 let mut shutdown = self.shutdown_rx.clone();
                 let busy = Arc::new(AtomicBool::new(false));
                 let semaphore = self.llm_semaphore.clone();
+                let consecutive_failures = Arc::new(AtomicU32::new(0));
+                let should_stop = Arc::new(AtomicBool::new(false));
 
                 info!(
                     agent = %name, id = %agent_id,
@@ -135,6 +163,15 @@ impl BackgroundExecutor {
 
                 let handle = tokio::spawn(async move {
                     loop {
+                        if should_stop.load(Ordering::SeqCst) {
+                            warn!(
+                                agent = %name,
+                                "Periodic loop: stopping after {MAX_CONSECUTIVE_FAILURES} \
+                                 consecutive failures — manual restart required"
+                            );
+                            break;
+                        }
+
                         tokio::select! {
                             _ = tokio::time::sleep(interval) => {}
                             _ = shutdown.changed() => {
@@ -156,7 +193,7 @@ impl BackgroundExecutor {
                             Ok(p) => p,
                             Err(_) => {
                                 busy.store(false, Ordering::SeqCst);
-                                break; // Semaphore closed
+                                break;
                             }
                         };
 
@@ -164,11 +201,22 @@ impl BackgroundExecutor {
                             "[SCHEDULED TICK] You are running on a periodic schedule ({cron_owned}). \
                              Perform your routine duties. Agent: {name}"
                         );
-                        debug!(agent = %name, "Periodic loop: sending scheduled prompt");
                         let busy_clone = busy.clone();
+                        let failures_clone = consecutive_failures.clone();
+                        let stop_clone = should_stop.clone();
+                        let name_clone = name.clone();
                         let jh = (send_message)(agent_id, prompt);
                         tokio::spawn(async move {
-                            let _ = jh.await;
+                            let success = jh.await.unwrap_or(false);
+                            if success {
+                                failures_clone.store(0, Ordering::SeqCst);
+                            } else {
+                                let n = failures_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                                warn!(agent = %name_clone, consecutive = n, "Periodic tick failed");
+                                if n >= MAX_CONSECUTIVE_FAILURES {
+                                    stop_clone.store(true, Ordering::SeqCst);
+                                }
+                            }
                             drop(permit);
                             busy_clone.store(false, Ordering::SeqCst);
                         });

@@ -4471,11 +4471,12 @@ impl OpenFangKernel {
                 let k = Arc::clone(&kernel);
                 tokio::spawn(async move {
                     match k.send_message(aid, &msg).await {
-                        Ok(_) => {}
+                        Ok(_) => true,
                         Err(e) => {
                             // send_message already records the panic in supervisor,
                             // just log the background context here
                             warn!(agent_id = %aid, error = %e, "Background tick failed");
+                            false
                         }
                     }
                 })
